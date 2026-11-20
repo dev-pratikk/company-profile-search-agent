@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Company Profile Search</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="bg" aria-hidden="true"><span class="blob b1"></span><span class="blob b2"></span><span class="blob b3"></span></div>
+
+<main class="wrap">
+  <header class="hero">
+    <div class="brand">
+      <div class="mark">
+        <svg viewBox="0 0 24 24"><path d="M3 21h18M5 21V7l7-4 7 4v14M9 9h1M14 9h1M9 13h1M14 13h1M10 21v-4h4v4"/></svg>
+      </div>
+      <div>
+        <h1>Company Profile Search</h1>
+        <p>Official contact details, address, social profiles and products, each with its source.</p>
+      </div>
+    </div>
+    <div id="providers" class="providers"></div>
+  </header>
+
+  <form id="form" class="glass search" autocomplete="off" novalidate>
+    <label class="field big">
+      <span>Company name <b class="req">*</b></span>
+      <input name="company_name" required placeholder="e.g. Zerodha">
+    </label>
+    <div class="grid4">
+      <label class="field"><span>Website / domain</span><input name="domain" placeholder="zerodha.com"></label>
+      <label class="field"><span>Email</span><input name="email" type="email" placeholder="info@company.com"></label>
+      <label class="field"><span>Phone</span><input name="phone" placeholder="+91 80 4040 2020"></label>
+      <label class="field"><span>Address</span><input name="address" placeholder="City, State"></label>
+    </div>
+    <div class="actions">
+      <button type="reset" class="ghost">Clear</button>
+      <button type="submit" id="submit">
+        <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <span>Search</span>
+      </button>
+    </div>
+  </form>
+
+  <div id="status" role="status"></div>
+  <section id="results"></section>
+</main>
+<script src="/static/app.js"></script>
+</body>
+</html>
