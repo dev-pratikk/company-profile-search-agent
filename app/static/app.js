@@ -270,8 +270,22 @@ function siteCard(name, site, onPick) {
           "for a better result, enter the website or location and search again.")));
   }
 
-  const fromEmail = site.via === "contact email";
-  const [confLabel, confCls] = CONFIDENCE[fromEmail ? "email" : site.confidence] || ["", ""];
+  const EMAIL_VIA = {
+    "contact email": ["From contact email", "good"],
+    "email brand": ["Matches the email's brand", "good"],
+    "email search": ["Linked to the email by search", "mid"],
+  };
+  const fromEmail = site.via in EMAIL_VIA;
+  const [confLabel, confCls] = fromEmail
+    ? (site.confidence === "low" ? ["Not confirmed", "bad"] : EMAIL_VIA[site.via])
+    : CONFIDENCE[site.confidence] || ["", ""];
+  // The email's own domain, when the website turned out to be elsewhere (bob@dbbaits.com -> dbbaits.co.za).
+  const emailRow = site.email_domain && site.email_domain !== site.domain
+    ? el("div", { class: "pweb second" }, el("span", { class: "muted" }, "Email domain:"),
+        el("span", {}, site.email_domain),
+        site.email_has_site === false ? el("span", { class: "tag" }, "no website") : null)
+    : null;
+  const noteRow = site.note ? el("div", { class: "muted second" }, site.note) : null;
   const warn = !fromEmail && (site.ambiguous || site.confidence === "low");
   const alts = (site.candidates || []).slice(0, 4);
 
@@ -310,6 +324,8 @@ function siteCard(name, site, onPick) {
         icon("globe"),
         ext(site.url, prettyUrl(site.url), "site"),
         confLabel ? el("span", { class: `tag ${confCls}` }, confLabel) : null),
+      emailRow,
+      noteRow,
       searchRow,
       warn
         ? el("div", { class: "warnbox" }, icon("warn"),

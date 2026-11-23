@@ -14,10 +14,12 @@ emails, address, social media profiles, and products & services. It uses only th
 **Step 1: find the official website** (`app/domain.py`, 2 Tavily searches, about 3 credits)
 
 - If you enter the website, it is used as-is.
-- If you enter a contact person's work email (not Gmail, Outlook and so on), **its domain is the primary website**
-  (`felipe@silicondreams.io` → silicondreams.io). The website found by web search is shown next to it when it
-  differs (e.g. silicondreams.net), with a "Use this instead" button, and the report checks whether both belong
-  to the same company.
+- If you enter a contact person's work email (not Gmail, Outlook and so on), the email decides:
+  - the email's domain has a website → **that is the primary website** (`felipe@silicondreams.io` → silicondreams.io);
+    a different site found by name search is shown next to it (silicondreams.net) with "Use this instead".
+  - the email's domain has **no** website (email-only domain) → the app asks Tavily, as the playground does,
+    which website belongs to that email, and picks the site with the same brand
+    (`bob@dbbaits.com` → dbbaits.com has no pages → **dbbaits.co.za**). Both are shown.
 - Otherwise two searches run in parallel: "What is the official website of X?" (advanced, with an answer)
   and "X company official site". LinkedIn, Wikipedia, Crunchbase, directories and news sites are excluded.
 - Each remaining domain is scored on: does the domain match the name or its acronym (`tcs.com` for Tata Consultancy

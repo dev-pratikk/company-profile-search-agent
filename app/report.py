@@ -91,7 +91,8 @@ def build_prompt(inputs: ReportInput) -> str:
     if inputs.email:
         parts.append(
             f"The user has the personal work email of someone who works at this company ({inputs.email}). "
-            f"Use only its domain to identify the company. It is not an official company email address: "
+            f"Use it only to identify the company (its email domain can differ from the website). "
+            f"It is not an official company email address: "
             f"do not list it under Official Email Addresses and do not search for this person."
         )
     parts.append("")

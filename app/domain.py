@@ -296,30 +296,93 @@ async def find_official_website(inputs: CompanyInput, client: httpx.AsyncClient)
 
     if not email_domain:
         return await _search_website(inputs, client)
+    return await _website_from_email(inputs, email_domain, client)
 
-    try:
-        found = await _search_website(inputs, client)
-    except TavilyError as e:  # search failed (e.g. no credits): the email domain still answers it
-        found = _site(None, None, None, None, "none", "search", None, [])
-        found["search_error"] = str(e)
 
-    # Reuse what the search knows about the email domain (homepage URL, title, icon) if it saw it.
-    same = found if found["domain"] == email_domain else next(
-        (c for c in found["candidates"] if c["domain"] == email_domain), None)
-    known_url = (same or {}).get("url")
-    site = _site(
-        email_domain,
-        known_url if known_url and is_homepage(known_url) else f"https://{email_domain}",
-        (same or {}).get("title"), (same or {}).get("favicon"),
-        "high", "contact email", found["answer"],
-        [c for c in found["candidates"] if c["domain"] != email_domain],
-        matched_name=found["matched_name"],
+async def _website_from_email(inputs: CompanyInput, email_domain: str, client: httpx.AsyncClient) -> dict:
+    """The email's domain is the strongest clue, but it isn't always the website: some companies send
+    email from a domain that has no site (bob@dbbaits.com -> website dbbaits.co.za). Three searches run
+    in parallel:
+      - the normal name search (shown as "found by web search")
+      - the Tavily-playground-style question with the email in it
+      - a check whether the email's domain has any pages at all
+    """
+    tv = Tavily(client)
+    brand = label_of(email_domain)  # "dbbaits" - the company's brand as it appears in its email
+    names = [Name(inputs.company_name), Name(brand)]
+
+    async def safe(coro):
+        try:
+            return await coro
+        except TavilyError as e:
+            return e
+
+    found, email_res, site_res = await asyncio.gather(
+        safe(_search_website(inputs, client)),
+        safe(tv.search(f"{inputs.company_name} company, email address {inputs.email}. "
+                       f"What is this company's official website?",
+                       search_depth="advanced", include_answer="advanced", max_results=10,
+                       include_favicon=True, exclude_domains=exclude_for(names))),
+        safe(tv.search(brand, search_depth="basic", max_results=3, include_domains=[email_domain])),
     )
-    if found["domain"] and found["domain"] != email_domain:
-        site["search_site"] = {k: found[k] for k in ("domain", "url", "title", "favicon", "confidence")}
-    site["search_agrees"] = found["domain"] == email_domain
-    if found.get("search_error"):
-        site["search_error"] = found["search_error"]
+    errors = [r for r in (found, email_res, site_res) if isinstance(r, TavilyError)]
+    if isinstance(found, TavilyError):
+        found = _site(None, None, None, None, "none", "search", None, [])
+    email_res = {} if isinstance(email_res, TavilyError) else email_res
+    email_results = email_res.get("results") or []
+    email_answer = email_res.get("answer")
+
+    # Does the email domain have a website? None = couldn't check (then trust the email, as before).
+    has_site = None if isinstance(site_res, TavilyError) else bool(site_res.get("results"))
+    if any(registrable(host_of(r.get("url") or "")) == email_domain for r in email_results):
+        has_site = True
+
+    scored, from_answer = _rank(names, [email_results], [email_answer], None)
+    by_domain = {c["domain"]: c for _, c in scored}
+    note = None
+
+    def entry(c: dict | None, domain: str) -> tuple[str, str | None, str | None]:
+        url = (c or {}).get("url")
+        return (url if url and is_homepage(url) else f"https://{domain}",
+                (c or {}).get("title"), (c or {}).get("favicon"))
+
+    # Same brand on another domain ending (dbbaits.co.za), from the email question or the name search.
+    brand_sites = [c for _, c in scored if c["domain"] != email_domain and label_of(c["domain"]) == brand]
+    if not brand_sites and found["domain"] and found["domain"] != email_domain and label_of(found["domain"]) == brand:
+        brand_sites = [found]
+    answer_site = next((c for _, c in scored if c["domain"] in from_answer and c["domain"] != email_domain), None)
+
+    if has_site is not False:
+        primary, via, confidence = email_domain, "contact email", "high"
+    elif brand_sites:
+        primary, via, confidence = brand_sites[0]["domain"], "email brand", "high"
+        note = f"{email_domain} (from the email) has no website; the company's website is {primary}."
+    elif answer_site:
+        primary, via, confidence = answer_site["domain"], "email search", "medium"
+        note = f"{email_domain} (from the email) has no website; Tavily links this email to {primary}."
+    else:
+        primary, via, confidence = email_domain, "contact email", "low"
+        note = f"No website was found on {email_domain}, and no other website could be linked to this email."
+
+    c = by_domain.get(primary) or (found if found["domain"] == primary else None) or next(
+        (x for x in found["candidates"] if x["domain"] == primary), None)
+    url, title, favicon = entry(c, primary)
+    alternatives = [x for x in found["candidates"] if x["domain"] not in (primary, email_domain)]
+    site = _site(primary, url, title, favicon, confidence, via, email_answer or found["answer"], alternatives,
+                 matched_name=found["matched_name"])
+    site["email_domain"] = email_domain
+    site["email_has_site"] = has_site
+    site["note"] = note
+    # Show what the name search found only if it plausibly is this company: it looks like the email's
+    # brand (silicondreams.net vs silicondreams.io) or clearly like the name typed. A vague name like
+    # "Bob" otherwise surfaces unrelated sites (bobcompany.it).
+    if found["domain"] and found["domain"] != primary:
+        lbl = label_of(found["domain"])
+        if Name(brand).label_score(lbl) > 0 or Name(inputs.company_name).label_score(lbl) >= 50:
+            site["search_site"] = {k: found[k] for k in ("domain", "url", "title", "favicon", "confidence")}
+    site["search_agrees"] = found["domain"] == primary
+    if errors:
+        site["search_error"] = str(errors[0])
     return site
 
 
