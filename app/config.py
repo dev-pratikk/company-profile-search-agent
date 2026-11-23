@@ -15,17 +15,21 @@ def _int(name: str, default: int, lo: int, hi: int) -> int:
         return default
 
 
+def _choice(name: str, default: str, allowed: tuple[str, ...]) -> str:
+    v = os.getenv(name, default).strip().lower()
+    return v if v in allowed else default
+
+
 class Settings:
     tavily_api_key: str = os.getenv("TAVILY_API_KEY", "").strip()
-    tavily_max_results: int = _int("TAVILY_MAX_RESULTS", 8, 1, 20)
-    companies_api_key: str = os.getenv("COMPANIES_API_KEY", "").strip()
-    # Tavily Research report: mini (4-110 credits), pro (15-250), auto, or off
-    research_model: str = os.getenv("TAVILY_RESEARCH_MODEL", "mini").strip().lower()
-    if research_model not in ("mini", "pro", "auto", "off"):
-        research_model = "mini"
-    research_enabled: bool = research_model != "off"
+    # Tavily Research model: auto (playground default), pro (most thorough), mini (cheapest)
+    research_model: str = _choice("TAVILY_RESEARCH_MODEL", "auto", ("auto", "pro", "mini"))
+    # Report length: short, standard, long
+    research_length: str = _choice("TAVILY_RESEARCH_LENGTH", "standard", ("short", "standard", "long"))
     research_timeout: int = _int("TAVILY_RESEARCH_TIMEOUT", 300, 60, 900)
-    http_timeout: float = 30.0
+    # Boost search results from this country, like Google does for your location
+    # (full lowercase name, e.g. "india", "united states"). Empty = worldwide.
+    search_country: str = os.getenv("TAVILY_COUNTRY", "").strip().lower()
 
 
 settings = Settings()

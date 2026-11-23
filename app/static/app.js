@@ -16,16 +16,9 @@ function el(tag, attrs = {}, ...children) {
 
 // Static icon markup (constants only, never user data).
 const ICONS = {
-  phone: '<path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2"/>',
-  mail: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/>',
-  pin: '<path d="M12 21s-7-6.2-7-11a7 7 0 0 1 14 0c0 4.8-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/>',
-  share: '<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 13.5 6.8 4M15.4 6.5l-6.8 4"/>',
-  box: '<path d="M21 8 12 3 3 8v8l9 5 9-5z"/><path d="m3 8 9 5 9-5M12 13v8"/>',
-  link: '<path d="M10 14a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 10a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/>',
-  check: '<path d="m5 12 5 5 9-10"/>',
-  x: '<path d="M6 6l12 12M18 6 6 18"/>',
-  out: '<path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>',
   copy: '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a1 1 0 0 1 1-1h10"/>',
+  globe: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>',
+  warn: '<path d="M12 3 2 20h20z"/><path d="M12 10v4M12 17h.01"/>',
 };
 function icon(name) {
   const s = document.createElementNS("http://www.w3.org/2000/svg", "svg");
@@ -39,7 +32,6 @@ const hostOf = (u) => { try { return new URL(u).hostname.replace(/^www\./, ""); 
 const faviconFor = (u) => `https://www.google.com/s2/favicons?domain=${encodeURIComponent(hostOf(u))}&sz=64`;
 const ext = (url, content, cls) =>
   el("a", { href: url, target: "_blank", rel: "noopener noreferrer", class: cls }, content ?? prettyUrl(url));
-const none = (t = "Not found") => el("p", { class: "none" }, t);
 
 /* =========================================================================
    Markdown renderer for the research report (safe: builds DOM nodes).
@@ -90,20 +82,67 @@ function citeNumbers(s) {
   return out;
 }
 
+/* ---- social platforms: official icon (the platform's own favicon) ---- */
+const PLATFORM_KEYS = [
+  [/linked\s*in/i, "linkedin.com"], [/facebook/i, "facebook.com"], [/instagram/i, "instagram.com"],
+  [/you\s*tube/i, "youtube.com"], [/whats\s*app/i, "whatsapp.com"], [/telegram/i, "telegram.org"],
+  [/twitter|^x\b/i, "x.com"], [/pinterest/i, "pinterest.com"], [/tik\s*tok/i, "tiktok.com"],
+  [/threads/i, "threads.net"], [/github/i, "github.com"],
+];
+const PLATFORM_HOSTS = {
+  "linkedin.com": "linkedin.com", "facebook.com": "facebook.com", "fb.com": "facebook.com",
+  "instagram.com": "instagram.com", "youtube.com": "youtube.com", "youtu.be": "youtube.com",
+  "x.com": "x.com", "twitter.com": "x.com", "whatsapp.com": "whatsapp.com", "wa.me": "whatsapp.com",
+  "t.me": "telegram.org", "telegram.me": "telegram.org", "pinterest.com": "pinterest.com",
+  "tiktok.com": "tiktok.com", "threads.net": "threads.net", "github.com": "github.com",
+};
+const platformOfKey = (key) => (PLATFORM_KEYS.find(([re]) => re.test(key.trim())) || [])[1] || null;
+function platformOfUrl(url) {
+  const h = hostOf(url);
+  const base = Object.keys(PLATFORM_HOSTS).find((d) => h === d || h.endsWith("." + d));
+  return base ? PLATFORM_HOSTS[base] : null;
+}
+function brandIcon(domain) {
+  const img = el("img", { class: "brand-ic", alt: "", referrerpolicy: "no-referrer", loading: "lazy",
+                          src: `https://www.google.com/s2/favicons?domain=${domain}&sz=64` });
+  img.onerror = () => img.remove();
+  return img;
+}
+
+// "**Phone:** +91 ..." / "Phone: ..." / "Kite — trading platform"  ->  bold key, normal-weight value.
+const KEY_RE = /^(?:\*\*|__)?([^:*_[\]\n]{1,48}?)(?:\*\*|__)?\s*(?::|\s[–—]\s)\s*(?:\*\*|__)?\s*(.+)$/;
+function keyed(text, ctx) {
+  const m = text.match(KEY_RE);
+  if (!m || /https?:|https?$|www\.|@/i.test(m[1].trim()) || m[2].startsWith("//")
+      || m[1].trim().split(/\s+/).length > 7) return inline(text, ctx);
+  const key = m[1].trim();
+  const platform = platformOfKey(key);
+  return [
+    platform ? brandIcon(platform) : null,
+    el("span", { class: "k" }, inline(key, ctx)), ": ",
+    el("span", { class: "v" }, inline(m[2], platform ? { ...ctx, noIcon: true } : ctx)),
+  ];
+}
+
+function socialLink(url, content, ctx) {
+  const platform = !ctx.noIcon && platformOfUrl(url);
+  return platform ? [brandIcon(platform), ext(url, content)] : ext(url, content);
+}
+
 function inline(text, ctx) {
   const out = [];
   let last = 0;
   for (const m of text.matchAll(INLINE)) {
     if (m.index > last) out.push(text.slice(last, m.index));
     if (m[1] != null || m[2] != null) out.push(el("strong", {}, inline(m[1] ?? m[2], ctx)));
-    else if (m[3] != null) out.push(ext(m[4], inline(m[3], ctx)));
+    else if (m[3] != null) out.push(socialLink(m[4], inline(m[3], ctx), ctx));
     else if (m[5] != null) out.push(citeNumbers(m[5]).map((n) => citeChip(n, ctx)));
     else if (m[6] != null) out.push(el("code", {}, m[6]));
     else if (m[7] != null) {
       let u = m[7];
       const trail = (u.match(/[.,;:!?]+$/) || [""])[0];
       if (trail) u = u.slice(0, -trail.length);
-      out.push(ext(u, prettyUrl(u)), trail);
+      out.push(socialLink(u, prettyUrl(u), ctx), trail);
     }
     else if (m[8] != null) out.push(el("a", { href: "mailto:" + m[8] }, m[8]));
     else if (m[9] != null) out.push(el("em", {}, inline(m[9], ctx)));
@@ -133,7 +172,7 @@ function renderMarkdown(md, ctx) {
   let para = [];
   let stack = []; // open lists: [{indent, node}]
 
-  const flushPara = () => { if (para.length) { root.append(el("p", {}, inline(para.join(" "), ctx))); para = []; } };
+  const flushPara = () => { if (para.length) { root.append(el("p", {}, keyed(para.join(" "), ctx))); para = []; } };
   const closeLists = () => { stack = []; };
 
   for (let i = 0; i < lines.length; i++) {
@@ -177,7 +216,7 @@ function renderMarkdown(md, ctx) {
         stack.push({ indent, node: list });
         top = stack.at(-1);
       }
-      top.node.append(el("li", {}, inline(m[3], ctx)));
+      top.node.append(el("li", {}, keyed(m[3], ctx)));
       continue;
     }
 
@@ -196,10 +235,95 @@ function renderMarkdown(md, ctx) {
 }
 
 /* =========================================================================
+   Official website card
+   ========================================================================= */
+const CONFIDENCE = {
+  provided: ["You provided", "good"],
+  email: ["From contact email", "good"],
+  high: ["High confidence", "good"],
+  medium: ["Likely", "mid"],
+  low: ["Not sure", "bad"],
+};
+
+function logoNode(name, urls) {
+  const initial = el("div", { class: "logo fallback" }, (name || "?").trim()[0]?.toUpperCase() || "?");
+  const list = urls.filter(Boolean);
+  if (!list.length) return initial;
+  const img = el("img", { class: "logo", alt: "", referrerpolicy: "no-referrer" });
+  let i = 0;
+  img.onerror = () => { i += 1; if (i < list.length) img.src = list[i]; else img.replaceWith(initial); };
+  img.src = list[0];
+  return img;
+}
+
+function siteCard(name, site, onPick) {
+  if (!site) {
+    return el("article", { class: "glass phead" },
+      el("div", { class: "sk l", style: "margin:0" }),
+      el("div", {}, el("div", { class: "pname" }, name),
+        el("div", { class: "muted" }, "Finding the official website…")));
+  }
+  if (!site.domain) {
+    return el("article", { class: "glass phead" }, logoNode(name, []),
+      el("div", {}, el("div", { class: "pname" }, name),
+        el("div", { class: "muted" }, "Could not identify the official website. The report will try to find it; " +
+          "for a better result, enter the website or location and search again.")));
+  }
+
+  const fromEmail = site.via === "contact email";
+  const [confLabel, confCls] = CONFIDENCE[fromEmail ? "email" : site.confidence] || ["", ""];
+  const warn = !fromEmail && (site.ambiguous || site.confidence === "low");
+  const alts = (site.candidates || []).slice(0, 4);
+
+  // Email given: also show what web search found, if it's a different website.
+  const s2 = site.search_site;
+  const searchRow = fromEmail
+    ? s2
+      ? el("div", { class: "pweb second" },
+          el("span", { class: "muted" }, "Found by web search:"),
+          ext(s2.url, prettyUrl(s2.url), "site"),
+          (() => { const b = el("button", { type: "button", class: "alt" }, "Use this instead"); b.onclick = () => onPick(s2.domain); return b; })())
+      : site.search_agrees
+        ? el("div", { class: "muted second" }, "Web search found the same website.")
+        : site.search_error
+          ? el("div", { class: "muted second" }, "Web search could not run: ", site.search_error)
+          : null
+    : null;
+
+  const altRow = alts.length && !fromEmail && site.confidence !== "high" && site.confidence !== "provided"
+    ? el("div", { class: "alts" }, el("span", { class: "muted" }, "Not the right company? Other matches:"),
+        alts.map((c) => {
+          const b = el("button", { type: "button", class: "alt", title: c.title || c.url }, c.domain);
+          b.onclick = () => onPick(c.domain);
+          return b;
+        }))
+    : null;
+
+  return el("article", { class: "glass phead" },
+    logoNode(name, [`https://www.google.com/s2/favicons?domain=${encodeURIComponent(site.domain)}&sz=128`, site.favicon]),
+    el("div", {},
+      el("div", { class: "pname" }, site.matched_name || name),
+      site.matched_name
+        ? el("div", { class: "muted" }, "Showing results for ", el("b", {}, site.matched_name), ` (you typed “${name}”)`)
+        : null,
+      el("div", { class: "pweb" },
+        icon("globe"),
+        ext(site.url, prettyUrl(site.url), "site"),
+        confLabel ? el("span", { class: `tag ${confCls}` }, confLabel) : null),
+      searchRow,
+      warn
+        ? el("div", { class: "warnbox" }, icon("warn"),
+            el("div", {}, site.ambiguous
+              ? `Several companies are named “${name}”. Make sure this is the right website, or add a location and search again.`
+              : "This website could not be confirmed. Check it, or enter the right website and search again."))
+        : null,
+      altRow));
+}
+
+/* =========================================================================
    Research report view
    ========================================================================= */
-function renderReport(r) {
-  const d = r.data || {};
+function renderReport(d) {
   const { body, map } = splitSources(d.content || "");
   const byUrl = new Map((d.sources || []).map((s) => [s.url.replace(/\/$/, ""), s]));
 
@@ -214,11 +338,13 @@ function renderReport(r) {
   const ctx = { cite: (n) => lookup.get(String(n)) };
 
   const meta = [
-    el("span", { class: "tag" }, "Tavily Research"),
-    d.model ? el("span", { class: "tag" }, `model: ${d.model}`) : null,
+    d.model === "search"
+      ? el("span", { class: "tag" }, "Tavily Search · quick report")
+      : el("span", { class: "tag" }, "Tavily Research"),
+    d.model && d.model !== "search" ? el("span", { class: "tag" }, `model: ${d.model}`) : null,
     el("span", { class: "tag" }, `${numbered.length} sources`),
     d.credits != null ? el("span", { class: "tag" }, `${d.credits} credits`) : null,
-    r.duration_ms != null ? el("span", { class: "tag" }, `${Math.round(r.duration_ms / 1000)}s`) : null,
+    d.duration_ms != null ? el("span", { class: "tag" }, `${Math.round(d.duration_ms / 1000)}s`) : null,
   ];
   const copy = el("button", { type: "button", class: "iconbtn", title: "Copy report as Markdown" }, icon("copy"), el("span", {}, "Copy"));
   copy.onclick = async () => {
@@ -240,261 +366,70 @@ function renderReport(r) {
         })))
     : null;
 
+  const prompt = d.prompt
+    ? el("details", { class: "prompt" }, el("summary", {}, "Prompt sent to Tavily Research"), el("pre", {}, d.prompt))
+    : null;
+
   return el("article", { class: "glass report" },
     el("div", { class: "rbar" }, el("div", { class: "rmeta" }, meta), copy),
+    d.note ? el("div", { class: "rnote" }, d.note) : null,
     renderMarkdown(body, ctx),
-    sources);
+    sources,
+    prompt);
 }
 
 function researchLoading() {
-  const sub = el("div", { class: "rsub" }, "Searching and reading sources. This usually takes 30–90 seconds.");
+  const sub = el("div", { class: "rsub" }, "Searching and reading sources. This usually takes 30–120 seconds.");
   const started = Date.now();
   const timer = setInterval(() => {
     if (!sub.isConnected) return clearInterval(timer);
-    sub.textContent = `Searching and reading sources… ${Math.round((Date.now() - started) / 1000)}s (usually 30–90s)`;
+    sub.textContent = `Searching and reading sources… ${Math.round((Date.now() - started) / 1000)}s (usually 30–120s)`;
   }, 1000);
   return el("div", { class: "glass researching" },
-    el("div", { class: "rhead" }, el("span", { class: "tab-dot" }), "Writing the research report"),
+    el("div", { class: "rhead" }, el("span", { class: "spin" }), "Writing the company report"),
     sub,
     ["40%", "92%", "85%", "70%", "30%", "88%", "76%"].map((w) => el("div", { class: "sk", style: `width:${w}` })));
 }
 
-/* =========================================================================
-   Verified details view (official website + The Companies API)
-   ========================================================================= */
-const VIA = {
-  "website structured data": ["Official website", "site"],
-  "official website": ["Official website", "site"],
-  "The Companies API": ["Companies API", "api"],
-  "web search": ["Web search", "web"],
-  "you provided": ["You provided", "user"],
-};
-function sourceChips(sources = []) {
-  const seen = new Set();
-  return sources.flatMap((s) => {
-    const [label, cls] = VIA[s.via] || [s.via, ""];
-    if (seen.has(label)) return [];
-    seen.add(label);
-    return s.url
-      ? [el("a", { class: `chip ${cls}`, href: s.url, target: "_blank", rel: "noopener noreferrer", title: s.url }, label, icon("out"))]
-      : [el("span", { class: `chip ${cls}` }, label)];
-  });
-}
-
-function card(title, iconName, count, ...body) {
-  return el("section", { class: "glass pcard" },
-    el("h3", {}, el("span", { class: "ic" }, icon(iconName)), title, count ? el("span", { class: "count" }, count) : null),
-    body);
-}
-
-function row(it, valueNode, ...tags) {
-  return el("li", { class: "row" },
-    el("div", { class: "rv" }, valueNode ?? it.value, tags),
-    el("div", { class: "chips" }, sourceChips(it.sources)));
-}
-
-function sourcesList(list, label = "sources") {
-  if (!list?.length) return null;
-  return el("details", { class: "srcs" },
-    el("summary", {}, `${list.length} ${label}`),
-    el("ol", {}, list.map((s) => el("li", {}, ext(s.url, s.title)))));
-}
-
-function linkPills(pages, label) {
-  if (!pages?.length) return null;
-  return el("div", { class: "sub" },
-    el("div", { class: "sublabel" }, label),
-    el("div", { class: "linkpills" }, pages.map((p) => ext(p.url, p.title || prettyUrl(p.url), "linkpill"))));
-}
-
-const SOCIAL = {
-  linkedin: ["LinkedIn", "in"], x_twitter: ["X / Twitter", "X"], facebook: ["Facebook", "f"],
-  instagram: ["Instagram", "IG"], youtube: ["YouTube", "▶"],
-};
-
-function logoNode(name, candidates = []) {
-  const initial = el("div", { class: "logo fallback" }, (name || "?").trim()[0]?.toUpperCase() || "?");
-  if (!candidates.length) return initial;
-  const img = el("img", { class: "logo", alt: `${name} logo`, referrerpolicy: "no-referrer" });
-  let i = 0;
-  img.onerror = () => { i += 1; if (i < candidates.length) img.src = candidates[i]; else img.replaceWith(initial); };
-  img.src = candidates[0];
-  return img;
-}
-
-function profileHeader(d) {
-  const p = d.products || {};
-  return el("article", { class: "glass phead" },
-    logoNode(d.name.value, (d.logo?.candidates || []).map((c) => c.url)),
-    el("div", {},
-      el("div", { class: "pname" }, d.name.value),
-      d.legal_name && d.legal_name.toLowerCase() !== d.name.value.toLowerCase()
-        ? el("div", { class: "tagline" }, "Legal name: ", d.legal_name) : null,
-      el("div", { class: "pweb" },
-        ext(d.website.url, prettyUrl(d.website.url)),
-        d.website.reachable ? el("span", { class: "tag good" }, "website online") : el("span", { class: "tag bad" }, "not reachable"),
-        p.industry ? el("span", { class: "tag" }, p.industry) : null),
-      p.tagline ? el("div", { class: "tagline" }, p.tagline) : null));
-}
-
-function placeholderHeader(name) {
-  return el("article", { class: "glass phead" },
-    el("div", { class: "sk l", style: "margin:0" }),
-    el("div", {}, el("div", { class: "pname" }, name), el("div", { class: "sk", style: "width:180px" })));
-}
-
-function simpleHeader(name) {
-  return el("article", { class: "glass phead" }, logoNode(name), el("div", {}, el("div", { class: "pname" }, name)));
-}
-
-function profileBody(d) {
-  const phones = d.contact?.phones || [];
-  const contact = card("Contact Information", "phone", phones.length ? `${phones.length} found` : null,
-    phones.length
-      ? el("ul", { class: "rows" }, phones.map((ph) => row(ph,
-          el("a", { href: "tel:" + ph.value.replace(/[^\d+]/g, "") }, ph.value),
-          ph.label ? el("span", { class: "tag" }, ph.label) : null,
-          ph.matches_input ? el("span", { class: "tag good" }, "matches your input") : null)))
-      : none("No phone number found"),
-    linkPills(d.contact?.pages, "Contact pages"));
-
-  const emails = d.emails || [];
-  const email = card("Official Email Address", "mail", emails.length ? `${emails.length} found` : null,
-    emails.length
-      ? el("ul", { class: "rows" }, emails.map((e) => row(e,
-          el("a", { href: "mailto:" + e.value }, e.value),
-          e.label ? el("span", { class: "tag" }, e.label) : null,
-          e.official ? null : el("span", { class: "tag bad" }, "not company domain"),
-          e.matches_input ? el("span", { class: "tag good" }, "matches your input") : null)))
-      : none());
-
-  const a = d.address || {};
-  const address = card("Company Address", "pin", null,
-    a.items?.length ? el("ul", { class: "rows" }, a.items.map((it) => row(it,
-      ext("https://www.google.com/maps/search/?api=1&query=" + encodeURIComponent(it.value), it.value)))) : null,
-    a.answer ? el("div", { class: "sub" }, el("div", { class: "sublabel" }, "From web search"), el("div", { class: "answer" }, a.answer), sourcesList(a.answer_sources)) : null,
-    !a.items?.length && !a.answer ? none() : null);
-
-  const socialKeys = Object.keys(SOCIAL).filter((k) => d.social?.[k]?.length);
-  const social = card("Social Media Profiles", "share", socialKeys.length ? `${socialKeys.length} of 5` : null,
-    socialKeys.length
-      ? el("ul", { class: "socials" }, socialKeys.flatMap((k) => d.social[k].map((s) =>
-          el("li", { class: "soc" },
-            el("span", { class: `sbadge ${k}` }, SOCIAL[k][1]),
-            el("div", {},
-              el("div", { class: "sname" }, SOCIAL[k][0]),
-              el("div", { class: "surl" }, ext(s.value)),
-              el("div", { class: "chips" }, sourceChips(s.sources)))))))
-      : none());
-
-  const p = d.products || {};
-  const products = el("section", { class: "glass pcard wide" },
-    el("h3", {}, el("span", { class: "ic" }, icon("box")), "Products & Services"),
-    p.description ? el("div", { class: "answer" }, p.description) : null,
-    p.answer ? el("div", { class: "sub" }, el("div", { class: "sublabel" }, "Products & services overview"), el("div", { class: "answer" }, p.answer), sourcesList(p.answer_sources)) : null,
-    p.industries?.length ? el("div", { class: "sub" }, el("div", { class: "sublabel" }, "Industries"),
-      el("div", { class: "linkpills" }, p.industries.map((i) => el("span", { class: "tag" }, i)))) : null,
-    linkPills(p.pages, "Pages on the official website"),
-    !p.description && !p.answer && !p.pages?.length ? none() : null);
-
-  const coverage = el("div", { class: "glass coverage-bar" },
-    el("div", { class: "coverage" }, Object.entries(d.coverage || {}).map(([k, ok]) =>
-      el("span", { class: `cov ${ok ? "yes" : "no"}` }, icon(ok ? "check" : "x"), k))));
-
-  return [coverage, el("div", { class: "pgrid" }, contact, email, address, social, products), allLinks(d), notesBox(d.notes)];
-}
-
-// Every link in the profile, split into official site vs other sources.
-function allLinks(d) {
-  const urls = new Map();
-  const add = (u, t) => { if (u && /^https?:/.test(u) && !urls.has(u)) urls.set(u, t || prettyUrl(u)); };
-  add(d.website.url, "Official website");
-  (d.contact?.pages || []).forEach((p) => add(p.url, p.title));
-  (d.products?.pages || []).forEach((p) => add(p.url, p.title));
-  Object.values(d.social || {}).flat().forEach((s) => add(s.value));
-  [d.name, ...(d.contact?.phones || []), ...(d.emails || []), ...(d.address?.items || []), ...Object.values(d.social || {}).flat()]
-    .forEach((it) => (it?.sources || []).forEach((s) => add(s.url)));
-  [...(d.address?.answer_sources || []), ...(d.products?.answer_sources || [])].forEach((s) => add(s.url, s.title));
-
-  const domain = d.website.domain;
-  const isOfficial = (u) => { const h = hostOf(u); return h === domain || h.endsWith("." + domain); };
-  const official = [...urls].filter(([u]) => isOfficial(u));
-  const other = [...urls].filter(([u]) => !isOfficial(u));
-  const list = (items) => items.length ? el("ul", {}, items.map(([u, t]) => el("li", {}, ext(u, t)))) : none("None");
-
-  return el("details", { class: "glass alllinks" },
-    el("summary", {}, el("span", { class: "ic" }, icon("link")), "All links & sources", el("span", { class: "count" }, `${urls.size}`)),
-    el("div", { class: "linkgroups" },
-      el("div", {}, el("div", { class: "sublabel" }, "Official website"), list(official)),
-      el("div", {}, el("div", { class: "sublabel" }, "Other sources"), list(other))));
-}
-
-function notesBox(notes) {
-  return notes?.length ? el("div", { class: "notes" }, el("ul", {}, notes.map((n) => el("li", {}, n)))) : null;
-}
-
-function messageCard(r) {
-  return el("article", { class: "glass card" },
-    el("h3", {}, r.label, " ", el("span", { class: `tag ${r.status === "ok" ? "good" : "bad"}` }, r.status)),
-    el("p", {}, r.summary));
-}
-
-function skeleton() {
-  return el("div", { class: "glass skeleton" },
-    ["40%", "70%", "55%", "62%"].map((w) => el("div", { class: "sk", style: `width:${w}` })));
+function messageCard(title, text) {
+  return el("article", { class: "glass card" }, el("h3", {}, title), el("p", {}, text));
 }
 
 /* =========================================================================
-   Config + providers
+   Search flow: 1) find the official website  2) research report
    ========================================================================= */
-let CONFIG = { tools: [], research_model: null };
-const isConfigured = (name) => !!CONFIG.tools.find((t) => t.name === name)?.configured;
+let CONFIG = { configured: false, model: null };
 
 async function loadConfig() {
   try {
-    CONFIG = await (await fetch("/api/tools")).json();
-    const providers = CONFIG.tools.flatMap((t) => t.providers || []);
-    if (isConfigured("research_report")) providers.push({ name: `Research · ${CONFIG.research_model}`, configured: true });
-    $("#providers").replaceChildren(...providers.map((p) =>
-      el("span", { class: `prov ${p.configured ? "on" : ""}`, title: p.configured ? "Connected" : "API key missing in .env" },
-        el("i"), p.name, p.configured ? null : " · no key")));
+    CONFIG = await (await fetch("/api/config")).json();
+    const u = CONFIG.usage;
+    const left = u ? u.limit - u.used : null;
+    $("#provider").replaceChildren(
+      el("span", { class: `prov ${CONFIG.configured ? "on" : ""}`, title: CONFIG.configured ? "Connected" : "TAVILY_API_KEY missing in .env" },
+        el("i"), CONFIG.configured ? `Tavily · research model: ${CONFIG.model}` : "Tavily · no API key"),
+      u ? el("span", { class: `prov ${left < 250 ? "low" : "on"}`, title: `${u.plan || "Plan"}: ${u.used} of ${u.limit} credits used` },
+        el("i"), `${left} of ${u.limit} credits left`) : null);
   } catch { /* non-critical */ }
 }
 
-/* =========================================================================
-   Search flow: each tool loads independently and shows when ready.
-   ========================================================================= */
-async function runTool(name, payload) {
-  const res = await fetch(`/api/run/${name}`, {
+async function post(path, payload) {
+  const res = await fetch(path, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
-  const data = await res.json();
+  const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.detail?.[0]?.msg || data.detail || `HTTP ${res.status}`);
-  return data.result;
+  return data;
 }
 
-function buildTabs(panes) {
-  const bar = el("nav", { class: "glass tabs", role: "tablist" });
-  const buttons = {};
-  for (const [key, label] of panes) {
-    const dot = el("span", { class: "dot loading" });
-    const b = el("button", { type: "button", class: "tab", role: "tab" }, dot, label);
-    b.onclick = () => select(key);
-    buttons[key] = { b, dot };
-    bar.append(b);
-  }
-  function select(key) {
-    for (const [k, { b }] of Object.entries(buttons)) b.classList.toggle("active", k === key);
-    document.querySelectorAll(".pane").forEach((p) => p.classList.toggle("hidden", p.dataset.pane !== key));
-  }
-  return { bar, select, setState: (key, s) => buttons[key] && (buttons[key].dot.className = `dot ${s}`) };
-}
+let searchId = 0;
 
 $("#form").addEventListener("submit", async (e) => {
   e.preventDefault();
-  const nameField = e.target.company_name;
+  const form = e.target;
+  const nameField = form.company_name;
   const nameWrap = nameField.closest(".field");
   if (!nameField.value.trim()) { nameWrap.classList.add("invalid"); nameField.focus(); return; }
   nameWrap.classList.remove("invalid");
@@ -502,69 +437,65 @@ $("#form").addEventListener("submit", async (e) => {
   const status = $("#status");
   status.className = "";
   status.textContent = "";
-  const hasProfile = isConfigured("company_profile");
-  const hasReport = isConfigured("research_report");
-  if (!hasProfile && !hasReport) {
+  if (!CONFIG.configured) {
     status.className = "err";
-    status.textContent = "No API keys configured. Add TAVILY_API_KEY and/or COMPANIES_API_KEY to .env.";
+    status.textContent = "TAVILY_API_KEY is not set. Add it to .env and restart.";
     return;
   }
 
-  const payload = Object.fromEntries(new FormData(e.target).entries());
+  const id = ++searchId; // ignore results from an older search
+  const payload = Object.fromEntries(new FormData(form).entries());
+  const name = payload.company_name.trim();
   const btn = $("#submit");
   btn.disabled = true;
   btn.querySelector("span").textContent = "Searching…";
 
-  // Layout: header, tabs, panes.
-  let head = placeholderHeader(payload.company_name.trim());
-  const reportPane = hasReport ? el("div", { class: "pane", "data-pane": "report" }, researchLoading()) : null;
-  const verifiedPane = hasProfile ? el("div", { class: "pane", "data-pane": "verified" }, skeleton()) : null;
-  const tabs = hasReport && hasProfile ? buildTabs([["report", "Report"], ["verified", "Verified details"]]) : null;
-  $("#results").replaceChildren(head, tabs?.bar, reportPane, verifiedPane);
-  tabs?.select(hasReport ? "report" : "verified");
+  const pick = (domain) => { form.domain.value = domain; form.requestSubmit(); };
+  let head = siteCard(name, null, pick);
+  const pane = el("div", { class: "pane" });
+  $("#results").replaceChildren(head, pane);
+  const setHead = (node) => { head.replaceWith(node); head = node; };
 
-  const replaceHead = (node) => { head.replaceWith(node); head = node; };
-  const jobs = [];
+  try {
+    // Step 1: official website
+    const site = await post("/api/resolve", payload);
+    if (id !== searchId) return;
+    setHead(siteCard(name, site, pick));
 
-  if (hasProfile) {
-    jobs.push(runTool("company_profile", payload).then((r) => {
-      if (r.data?.website) {
-        replaceHead(profileHeader(r.data));
-        verifiedPane.replaceChildren(...profileBody(r.data).filter(Boolean));
-      } else {
-        replaceHead(simpleHeader(payload.company_name.trim()));
-        verifiedPane.replaceChildren(messageCard(r));
-      }
-      tabs?.setState("verified", r.status);
-    }).catch((err) => {
-      replaceHead(simpleHeader(payload.company_name.trim()));
-      verifiedPane.replaceChildren(messageCard({ label: "Verified details", status: "error", summary: err.message }));
-      tabs?.setState("verified", "error");
-    }));
-  } else {
-    replaceHead(simpleHeader(payload.company_name.trim()));
+    // Step 2: report, anchored to that website
+    pane.replaceChildren(researchLoading());
+    const report = await post("/api/report", {
+      ...payload,
+      company_name: site.matched_name || payload.company_name, // corrected spelling, if any
+      domain: site.domain,
+      domain_confidence: site.confidence,
+      other_domain: site.search_site?.domain || null,
+    });
+    if (id !== searchId) return;
+    pane.replaceChildren(report.content?.trim()
+      ? renderReport(report)
+      : messageCard("No report", "Tavily Research finished but returned no report. Try again."));
+    loadConfig(); // refresh the credits counter
+  } catch (err) {
+    if (id !== searchId) return;
+    if (head.querySelector(".sk")) setHead(siteCard(name, { domain: null }, pick));
+    pane.replaceChildren(messageCard("Search failed", err.message));
+  } finally {
+    if (id === searchId) {
+      btn.disabled = false;
+      btn.querySelector("span").textContent = "Search";
+    }
   }
-
-  if (hasReport) {
-    jobs.push(runTool("research_report", payload).then((r) => {
-      reportPane.replaceChildren(r.status === "ok" ? renderReport(r) : messageCard(r));
-      tabs?.setState("report", r.status);
-    }).catch((err) => {
-      reportPane.replaceChildren(messageCard({ label: "Research Report", status: "error", summary: err.message }));
-      tabs?.setState("report", "error");
-    }));
-  }
-
-  await Promise.allSettled(jobs);
-  btn.disabled = false;
-  btn.querySelector("span").textContent = "Search";
 });
 
 $("#form").company_name.addEventListener("input", (e) => e.target.closest(".field").classList.remove("invalid"));
 $("#form").addEventListener("reset", () => {
+  searchId++;
   $("#results").replaceChildren();
   $("#status").textContent = "";
   $("#status").className = "";
+  $("#submit").disabled = false;
+  $("#submit").querySelector("span").textContent = "Search";
 });
 
 loadConfig();

@@ -1,5 +1,6 @@
-"""Input model for a company search. Only company_name is mandatory."""
+"""Request models. Only company_name is mandatory."""
 import re
+from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -44,3 +45,16 @@ class CompanyInput(BaseModel):
     @classmethod
     def _lower_email(cls, v):
         return v.lower() if v else None
+
+
+class ReportInput(CompanyInput):
+    # How sure we are that `domain` is the official website (from /api/resolve).
+    # Leave empty when the user typed the domain themselves.
+    domain_confidence: Literal["provided", "high", "medium", "low", "none"] | None = None
+    # A different website that web search found for the same name (when `domain` came from the email).
+    other_domain: str | None = None
+
+    @field_validator("other_domain")
+    @classmethod
+    def _normalize_other(cls, v):
+        return cls._normalize_domain(v)

@@ -1,63 +1,70 @@
 # Company Profile Search Agent
 
-Search a company by name (optionally domain, email, phone, address) and get its official profile, with a source for every value.
+Type a company name and get a cited company profile: official website, overview, contact numbers,
+emails, address, social media profiles, and products & services. It uses only the Tavily API.
 
 ## Run
 
-1. Put your keys in `.env` (see `.env.example`): `TAVILY_API_KEY` and `COMPANIES_API_KEY`. Either one alone also works.
-2. `.\run.ps1` (creates `.venv` and installs deps the first time)
+1. Put your key in `.env` (see `.env.example`): `TAVILY_API_KEY`.
+2. `.\run.ps1` (creates `.venv` and installs dependencies the first time).
 3. Open http://127.0.0.1:8000
+
+## How it works
+
+**Step 1: find the official website** (`app/domain.py`, 2 Tavily searches, about 3 credits)
+
+- If you enter the website, it is used as-is.
+- If you enter a contact person's work email (not Gmail, Outlook and so on), **its domain is the primary website**
+  (`felipe@silicondreams.io` → silicondreams.io). The website found by web search is shown next to it when it
+  differs (e.g. silicondreams.net), with a "Use this instead" button, and the report checks whether both belong
+  to the same company.
+- Otherwise two searches run in parallel: "What is the official website of X?" (advanced, with an answer)
+  and "X company official site". LinkedIn, Wikipedia, Crunchbase, directories and news sites are excluded.
+- Each remaining domain is scored on: does the domain match the name or its acronym (`tcs.com` for Tata Consultancy
+  Services), does Tavily's answer name it, is it a homepage, how high does it rank, and does it appear in both searches.
+- Near spellings count as a match ("QuantaReality" matches `quantarealty.in`). Trademark registries, property
+  portals and other pages *about* a company are never picked.
+- **Did you mean:** if nothing convincing is found, it searches spelling variants (split words, common
+  misspellings like reality → realty), like Google's autocorrect, and shows "Showing results for …".
+- `TAVILY_COUNTRY` (e.g. `india`) favours local companies, as Google does for your location:
+  "Quantum Realty" gives the Indian `quantumrealty.co.in`, not the US firms with that name.
+- The result has a confidence level. When several companies share the name, the UI says so and offers the other
+  matches. Click one, or add a location, to search again.
+
+**Step 2: research report** (`app/report.py`, Tavily Research)
+
+The prompt anchors the research to the official domain ("report only on the organisation that owns X"),
+sets fixed sections, and gives rules: official website first, copy contact details exactly, never guess emails,
+write "Not publicly listed" when something can't be found, and cite everything. The domain is also passed as
+`include_domains`, a soft preference so other sources are still allowed.
+The full prompt is shown under each report ("Prompt sent to Tavily Research"), so you can paste it into the Tavily playground to compare.
+
+**When Research is refused** (`app/quick_report.py`)
+
+Tavily refuses a Research job up front when the plan's remaining credits can't cover its worst-case cost
+(roughly 100+ credits). The app then tries `mini`, and if that is refused too, it builds a quick report from
+3 Tavily searches (6 credits). Contact details in that report come only from the official domain.
+The header shows how many plan credits are left.
+
+## Settings (`.env`)
+
+| Key | Default | Meaning |
+|---|---|---|
+| `TAVILY_API_KEY` | | required |
+| `TAVILY_RESEARCH_MODEL` | `auto` | `auto` (playground default), `pro` (most thorough), `mini` (cheapest). If your plan refuses `auto`/`pro` for credit limits, the app retries with `mini` automatically. |
+| `TAVILY_RESEARCH_LENGTH` | `standard` | `short`, `standard`, `long` |
+| `TAVILY_COUNTRY` | (empty) | Favour results from this country, e.g. `india`, `united states`. Empty = worldwide. |
+| `TAVILY_RESEARCH_TIMEOUT` | `300` | seconds to wait for a report |
 
 ## Structure
 
 ```
 app/
-  main.py            FastAPI routes: /, /api/tools, /api/search
-  config.py          reads .env
-  models.py          CompanyInput (company_name required, rest optional)
-  tools/
-    base.py          Tool base class + ToolResult
-    __init__.py      TOOLS registry, runs all tools in parallel
-    company_profile.py  Builds the official profile (name, contact, email, address, social, products, logo)
-    tavily_client.py    Tavily search + extract wrapper
-    companies_api.py    The Companies API client + response parser
-    research_report.py  Playground-style report via Tavily Research (cited markdown)
-    extractors.py       Parsers for emails, phones, social links, logos, schema.org data
-  static/            UI (index.html, app.js, style.css)
+  main.py      FastAPI routes: / , /api/config, /api/resolve (step 1), /api/report (step 2), /api/search (both)
+  config.py    reads .env
+  models.py    CompanyInput (company_name required), ReportInput
+  tavily.py    Tavily Search + Research client
+  domain.py    official website detection
+  report.py    research prompt + report
+  static/      UI (index.html, app.js, style.css)
 ```
-
-## Tools
-
-| Tool | Status | Needs |
-|---|---|---|
-| Company Profile (official website + The Companies API + Tavily) | done | company_name |
-| Domain active | todo | domain |
-| Domain age | todo | domain |
-| Email verifier | todo | email |
-| Phone verifier | todo | phone |
-| Social media active | todo | social links found by the profile |
-| Contact & address | todo | address |
-
-## Adding a verifier
-
-1. Create `app/tools/<name>.py` with a `Tool` subclass: set `name`, `label`, `required_inputs`, implement `is_configured()` and `async run()`.
-2. Add it to `TOOLS` in `app/tools/__init__.py`.
-3. (Optional) Add a renderer for it in `app/static/app.js` (`renderers.<name>`); otherwise the result shows as JSON.
-
-## Research report
-
-The **Report** tab uses the Tavily Research API (same as the Tavily playground "Research"): a markdown report
-with numbered citations, rendered with source favicons and a numbered source list.
-Set `TAVILY_RESEARCH_MODEL` in `.env`: `mini` (4-110 credits, ~45s), `pro` (15-250 credits, more thorough), `auto`, or `off`.
-The **Verified details** tab shows the structured data from the official website and The Companies API.
-
-## How the Company Profile is built
-
-1. Find the official website: the domain you entered, your email's domain, or a Tavily search (skips LinkedIn, Wikipedia and other directory sites).
-2. Read the website: the homepage HTML (schema.org data, footer links, logo), plus Tavily Extract on the homepage and contact/about pages.
-3. Look the domain up in The Companies API (name, legal name, logo, emails, phones, HQ address, socials, description, industry).
-4. Ask Tavily two questions: products & services, and HQ address/contact.
-5. Merge: the same value from several sources is shown once, with every source attached.
-
-Source labels: `Official website` (most trusted), `Companies API`, `Web search` (check it), `You provided`.
-Cost per search: about 3-5 Tavily credits with research on (7-9 with it off), plus the research report, + 1 Companies API credit (0 if the company isn't in their database).
